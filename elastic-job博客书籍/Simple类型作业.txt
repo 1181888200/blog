@@ -1,0 +1,237 @@
+elastic-job之Simple类型作业实现
+
+1.什么是Simple类型作业？
+
+Simple类型作业意为简单实现，未经任何封装的类型。需实现SimpleJob接口。该接口仅提供单一方法用于覆盖，此方法将定时执行。与Quartz原生接口相似，但提供了弹性扩缩容和分片等功能。
+
+2. 我们通过实践代码来说明Simple类型作业，通过API启动方式调用，后续通过spring注解的方式会直接我的github上：https://github.com/1181888200/boot-elastic-job
+
+
+2.1 首先我们maven创建一个普通的java项目，然后在pom文件中加入下面这行引入
+
+<dependency>
+	<groupId>com.dangdang</groupId>
+	<artifactId>elastic-job-lite-core</artifactId>
+	<version>2.1.5</version>
+</dependency>
+
+2.2 既然是Simple类型，当然要实现SimpleJob接口，那么我们首先创建一个类ApiMyElasticJobSimple让他实现SimpleJob接口，然后重写它的execute方法，其实和Quartz原生接口很相似，这个execute方法里面就是你要实现的定时任务
+
+package com.lwl.boot.job.simple;
+import com.dangdang.ddframe.job.api.ShardingContext;
+import com.dangdang.ddframe.job.api.simple.SimpleJob;
+
+/**
+ * 任务调度
+ *
+ */
+public class ApiMyElasticJobSimple implements SimpleJob {
+
+	@Override
+	public void execute(ShardingContext content) {
+		
+		int key = content.getShardingItem();
+		System.out.println();
+		System.out.println("----------------------"+key+"-------------------");
+		System.out.println();
+		
+		switch (key) {
+		case 0:
+			System.out.println("任务调度执行3: "+key);
+			break;
+		case 1:
+			System.out.println("任务调度执行3: "+key);
+			break;
+		case 2:
+			System.out.println("任务调度执行3: "+key);
+			break;
+
+		default:
+			System.out.println("没有任务调度执行");
+			break;
+		}	
+	}
+}
+
+
+2.3 既然有了定时任务，剩下的就是如何启动它了，因为我们使用的是API的方式启动，所有我们就直接创建一个类ApiJobSimple，通过该类初始化对应的配置，如何main方法启动。
+package com.lwl.boot.job.simple;
+
+import com.dangdang.ddframe.job.config.JobCoreConfiguration;
+import com.dangdang.ddframe.job.config.simple.SimpleJobConfiguration;
+import com.dangdang.ddframe.job.lite.api.JobScheduler;
+import com.dangdang.ddframe.job.lite.api.strategy.impl.AverageAllocationJobShardingStrategy;
+import com.dangdang.ddframe.job.lite.config.LiteJobConfiguration;
+import com.dangdang.ddframe.job.reg.base.CoordinatorRegistryCenter;
+import com.dangdang.ddframe.job.reg.zookeeper.ZookeeperConfiguration;
+import com.dangdang.ddframe.job.reg.zookeeper.ZookeeperRegistryCenter;
+
+
+public class ApiJobSimple {
+
+	
+	public static void main(String[] args) {
+		new JobScheduler(registryCenter(),configuration()).init();
+	}
+	
+	
+	private static CoordinatorRegistryCenter registryCenter() {
+		//配置zookeeper
+		//注册中心( CoordinatorRegistryCenter )：用于协调分布式服务
+		//连接Zookeeper服务器的列表. 多个地址用逗号分隔. 如: host1:2181,host2:2181
+		String serverLists = "localhost:2181";
+		//如果你有多个不同 Elastic-Job集群 时，使用相同 Zookeeper，可以配置不同的 namespace 进行隔离
+		String namespace = "elastic-job-demo";
+		CoordinatorRegistryCenter registryCenter = 
+					new ZookeeperRegistryCenter(new ZookeeperConfiguration(serverLists, namespace));
+		registryCenter.init();
+		return registryCenter;
+	}
+
+	
+	private static LiteJobConfiguration configuration() {
+		
+		 // 定义作业核心配置
+		String jobName = "simpleJob"; //作业名称
+		String cron = "0/15 * * * * ?";	//定时器表达式,用于控制作业触发时间
+		int shardingTotalCount = 3; //作业分片总数,如果一个作业启动超过作业分片总数的节点，只有 shardingTotalCount 会执行作业.换句话说：当服务器数量大于分片总数，那么不是所有服务器都将会执行，而是根据分片总数来定。
+		JobCoreConfiguration coreConfiguration = JobCoreConfiguration.newBuilder(jobName, cron, shardingTotalCount).build();
+		
+		
+		// 定义SIMPLE类型配置
+		//		意为简单实现，未经任何封装的类型。需实现SimpleJob接口。该接口仅提供单一方法用于覆盖，
+		//		此方法将定时执行。与Quartz原生接口相似，但提供了弹性扩缩容和分片等功能。
+		//任务执行类名称:com.lwl.boot.job.simple.ApiMyElasticJobSimple
+		String jobClass = ApiMyElasticJobSimple.class.getCanonicalName();
+		SimpleJobConfiguration simpleJobConfiguration = new SimpleJobConfiguration(coreConfiguration, jobClass); 
+		
+		
+		 // 定义Lite作业根配置
+		//作业分片策略:系统提供三种策略和自定义可供选择
+		/*
+		 * 	1. AverageAllocationJobShardingStrategy：基于平均分配算法的分片策略
+		 *  2. OdevitySortByNameJobShardingStrategy：根据作业名的哈希值奇偶数决定IP升降序算法的分片策略
+		 *  3. RotateServerByNameJobShardingStrategy:根据作业名的哈希值对服务器列表进行轮转的分片策略
+		 * 	4. 实现JobShardingStrategy接口，并且实现sharding的方法，
+		 * 		接口方法参数为【作业服务器IP列表和分片策略选项】，【分片策略选项包括作业名称】，【分片总数以及分片序列号和个性化参数对照表】，可以根据需求定制化自己的分片策略。
+		 * */
+		//默认的分片策略
+		String jobShardingStrategyClass = AverageAllocationJobShardingStrategy.class.getCanonicalName();
+		
+		
+		LiteJobConfiguration simpleJobRootConfig = LiteJobConfiguration.newBuilder(simpleJobConfiguration).jobShardingStrategyClass(jobShardingStrategyClass).build();
+		
+		
+		return simpleJobRootConfig;
+	}
+		
+}
+
+
+2.3.1 registryCenter()方法
+	registryCenter()实现的是注册中心，注册中心是通过zookeeper实现的，其类型为：ZookeeperRegistryCenter而他需要一个zookeeper的配置ZookeeperConfiguration实体类，在创建ZookeeperConfiguration实体类的时候需要注意他的参数
+	ZookeeperConfiguration：参数说明（红色为必传字段）
+		serverLists：连接Zookeeper服务器的列表，包括IP地址和端口号，多个地址用逗号分隔，如: host1:2181,host2:2181
+		namespace：Zookeeper的命名空间，/如果你有多个不同 Elastic-Job集群 时，使用相同 Zookeeper，可以配置不同的 namespace 进行隔离
+		baseSleepTimeMilliseconds：等待重试的间隔时间的初始值  单位：毫秒
+		maxSleepTimeMilliseconds：等待重试的间隔时间的最大值   单位：毫秒
+		maxRetries：最大重试次数
+		sessionTimeoutMilliseconds：会话超时时间  单位：毫秒
+		connectionTimeoutMilliseconds：连接超时时间  单位：毫秒
+		digest：连接Zookeeper的权限令牌，缺省为不需要权限验证
+		
+		
+2.3.2 configuration()方法：作业配置，这个方法注意做了三件事情，定义作业核心配置，定义作业类型，定义根配置
+		作业配置分为3级，分别是JobCoreConfiguration，JobTypeConfiguration和LiteJobConfiguration。LiteJobConfiguration <--- JobTypeConfiguration，JobTypeConfiguration <--- JobCoreConfiguration，层层嵌套
+		1）定义作业核心配置
+		作业核心配置：就是起码要知道我这个定时器叫什么，什么时候启动，有没有做分片
+		JobCoreConfiguration：参数说明（红色为必传字段）
+		jobName：作业名称
+		cron：cron表达式，用于控制作业触发时间
+		shardingTotalCount：作业分片总数,如果一个作业启动超过作业分片总数的节点，只有 shardingTotalCount 会执行作业
+		shardingItemParameters：分片序列号和参数用等号分隔，多个键值对用逗号分隔，分片序列号从0开始，不可大于或等于作业分片总数，如：0=a,1=b,2=c
+		jobParameter：作业自定义参数，作业自定义参数，可通过传递该参数为作业调度的业务方法传参，用于实现带参数的作业，例：每次获取的数据量、作业实例从数据库读取的主键等
+		failover：是否开启任务执行失效转移，开启表示如果作业在一次任务执行中途宕机，允许将该次未完成的任务在另一作业节点上补偿执行
+		misfire：是否开启错过任务重新执行
+		description：作业描述信息
+		jobProperties：配置jobProperties定义的枚举控制Elastic-Job的实现细节，JOB_EXCEPTION_HANDLER用于扩展异常处理类，EXECUTOR_SERVICE_HANDLER用于扩展作业处理线程池类
+		
+		2）定义作业类型
+		作业类型主要分为三种：SimpleJob（简单作业），DataflowJob（数据流作业），ScriptJob（脚本作业），它们的配置实现类分别对应着：SimpleJobConfiguration，DataflowJobConfiguration，ScriptJobConfiguration
+		由于使用的是Simple类型，使用就对应SimpleJobConfiguration配置
+		SimpleJobConfiguration：参数说明（红色为必传字段）
+		coreConfig：即1）的核心配置类
+		jobClass：作业实现类，即实现SimpleJob类的全称，可以通过【类.class.getCanonicalName()】获取
+		
+		3） 定义Lite作业根配置
+		 定义Lite作业根配置主要定义了 对任务调度的监控和使用分片策略
+		 作业分片策略:系统提供三种策略和自定义可供选择
+			1. AverageAllocationJobShardingStrategy：基于平均分配算法的分片策略
+			策略说明：
+				如果分片不能整除，则不能整除的多余分片将依次追加到序号小的服务器。如：
+				如果有3台服务器，分成9片，则每台服务器分到的分片是：1=[0,1,2], 2=[3,4,5], 3=[6,7,8]
+				如果有3台服务器，分成8片，则每台服务器分到的分片是：1=[0,1,6], 2=[2,3,7], 3=[4,5]
+				如果有3台服务器，分成10片，则每台服务器分到的分片是：1=[0,1,2,9], 2=[3,4,5], 3=[6,7,8]
+		
+			2. OdevitySortByNameJobShardingStrategy：根据作业名的哈希值奇偶数决定IP升降序算法的分片策略
+		    策略说明：
+				作业名的哈希值为奇数则IP升序。
+				作业名的哈希值为偶数则IP降序。
+				用于不同的作业平均分配负载至不同的服务器。
+				AverageAllocationJobShardingStrategy的缺点是，一旦分片数小于作业服务器数，作业将永远分配至IP地址靠前的服务器，导致IP地址靠后的服务器空闲。而OdevitySortByNameJobShardingStrategy则可以根据作业名称重新分配服务器负载。如：
+				如果有3台服务器，分成2片，作业名称的哈希值为奇数，则每台服务器分到的分片是：1=[0], 2=[1], 3=[]
+				如果有3台服务器，分成2片，作业名称的哈希值为偶数，则每台服务器分到的分片是：3=[0], 2=[1], 1=[]
+							
+			3. RotateServerByNameJobShardingStrategy:根据作业名的哈希值对服务器列表进行轮转的分片策略
+
+			
+			4. 实现JobShardingStrategy接口，并且实现sharding的方法，
+		   		接口方法参数为【作业服务器IP列表和分片策略选项】，【分片策略选项包括作业名称】，【分片总数以及分片序列号和个性化参数对照表】，可以根据需求定制化自己的分片策略。
+				
+		 LiteJobConfiguration：参数说明（红色为必传字段）
+		jobConfig：即 2）中的任务类型配置
+		jobShardingStrategyClass：作业分片策略实现类全路径，默认使用平均分配策略
+		monitorExecution：监控作业运行时状态
+			每次作业执行时间和间隔时间均非常短的情况，建议不监控作业运行时状态以提升效率。因为是瞬时状态，所以无必要监控。请用户自行增加数据堆积监控。并且不能保证数据重复选取，应在作业中实现幂等性。
+			每次作业执行时间和间隔时间均较长的情况，建议监控作业运行时状态，可保证数据不会重复选取。
+		monitorPort：作业监控端口，建议配置作业监控端口, 方便开发者dump作业信息。，使用方法: echo “dump” | nc 127.0.0.1 9888
+		maxTimeDiffSeconds：最大允许的本机与注册中心的时间误差秒数，如果时间误差超过配置秒数则作业启动时将抛异常，配置为-1表示不校验时间误差
+		reconcileIntervalMinutes：修复作业服务器不一致状态服务调度间隔时间，配置为小于1的任意值表示不执行修复    单位：分钟
+		eventTraceRdbDataSource：作业事件追踪的数据源Bean引用
+		
+		
+	
+3. 启动API,调用ApiJobSimple中main方法
+	当启动之后，定时器开始正常工作，控制台打印出的日志是这样的：
+		
+	----------------------0-------------------
+
+	任务调度执行3: 0
+
+	----------------------1-------------------
+
+	任务调度执行3: 1
+
+	----------------------2-------------------
+
+	任务调度执行3: 2		
+	
+	就是当只有一个定时任务在跑的时候，所有任务都会被他执行，但是当你再启动一个面方法，之前的那个不要关闭，那么就出现2个输出控制台日志为：
+	第一台的控制台
+	----------------------1-------------------
+
+	任务调度执行3: 1
+	
+	第二台的控制台
+	----------------------0-------------------
+
+	任务调度执行3: 0
+	----------------------2-------------------
+
+	任务调度执行3: 2	
+	
+	任务就被分片到这2台机器上了，默认采用的是平均分配算法的分片策略，当然你再启用一下main方法，你就发现他们各自输出一条记录，好了就到这里了。
+		
+		
+		
+		
